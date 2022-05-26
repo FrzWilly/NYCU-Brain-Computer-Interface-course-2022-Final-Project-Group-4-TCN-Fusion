@@ -341,7 +341,7 @@ def run_models(
     print("(at epoch", best_test_cr_ep, ")")
     print("\n")
 
-    f = open("individual training results.txt", "a")
+    f = open("individual training results.txt\n", "a")
     f.write(f"S{test_n}: {best_test_cr} at epoch {best_test_cr_ep}")
     f.close()
     #PlotImg('EEGBlock', **rec)
@@ -425,7 +425,7 @@ def main():
     f.close()
 
     for (key1, key2), value in all_rec:
-        print(f"{key1}, {key2} final acc: ", value)
+        print(f"{key1}, {key2} final acc: \n\n", value)
 
 if __name__ == '__main__':
     main()
