@@ -2,6 +2,7 @@ from ctypes import sizeof
 from random import shuffle
 import torch
 import math
+import os
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader
@@ -157,13 +158,13 @@ class TCNFusion(nn.Module):
         self.F1 = 8
         self.F2 = 16
         self.FT = 12
-        self.D = 2
+        self.D = 3
 
-        self.block1 = EEGBlock()
+        self.block1 = EEGBlock(pe=0.3)
         modules = []
         for i in range(self.D):
             F2 = self.F2 if i == 0 else self.FT
-            modules.append(TCNBlock(F2=F2, dilate_rate=2**i))
+            modules.append(TCNBlock(F2=F2, dilate_rate=2**i, pt=0.3))
         
         self.block2 = nn.Sequential(*modules)
 
@@ -201,6 +202,8 @@ class TCNFusion(nn.Module):
 def run_models( 
     models, epoch, batch, learning_rate, 
     optimizer=optim.Adam, loss_func = nn.CrossEntropyLoss(), train_n = 1, test_n = 1, opt="sgd"):
+
+    global input_name
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -267,7 +270,7 @@ def run_models(
             model.train()
 
             outputs = model.forward(inputs[:, None])
-            loss = loss_func(outputs, labels) #+ 2.5e-3*torch.norm(model.classifier.weight, p=2) + 1e-2*torch.norm(model.block1.depwise.weight, p=2)
+            loss = loss_func(outputs, labels) + 2.5e-1*torch.norm(model.classifier.weight, p=2)# + 1e-3*torch.norm(model.block1.depwise.weight, p=2)
             loss.backward()
 
             train_cr += (
@@ -324,7 +327,7 @@ def run_models(
             disp = ConfusionMatrixDisplay(confusion_matrix = conf_matrix, display_labels = [0, 1, 2, 3])
             disp = disp.plot(cmap = plt.cm.Blues)
 
-            plt.savefig(f'confusion_all_{batch}_{learning_rate}_{opt}_subject0{train_n}.png')
+            plt.savefig(f'./{input_name}/confusion_all_{batch}_{learning_rate}_{opt}_subject0{train_n}.png')
             #plt.show()
             conf_matrix = confusion_matrix( 
                 pred, real, normalize = 'true'
@@ -332,7 +335,7 @@ def run_models(
             disp = ConfusionMatrixDisplay(confusion_matrix = conf_matrix, display_labels = [0, 1, 2, 3])
             disp = disp.plot(cmap = plt.cm.Blues)
 
-            plt.savefig(f'confusion_true_{batch}_{learning_rate}_{opt}_subject0{train_n}.png')
+            plt.savefig(f'./{input_name}/confusion_true_{batch}_{learning_rate}_{opt}_subject0{train_n}.png')
             #plt.show()
 
     print("\ntraining data final accuracy:", rec["train"][len(rec["train"])-1])
@@ -341,7 +344,7 @@ def run_models(
     print("(at epoch", best_test_cr_ep, ")")
     print("\n")
 
-    f = open("individual training results.txt", "a")
+    f = open(f"./{input_name}/individual training results.txt", "a")
     f.write(f"S{test_n}: {best_test_cr} at epoch {best_test_cr_ep}\n")
     f.close()
     #PlotImg('EEGBlock', **rec)
@@ -354,6 +357,8 @@ def run_models(
     return rec, best_test_cr
 
 def plot(title = 'OwO', accline = [75, 80, 85, 87], **kwargs):
+    global input_name
+
     fig = plt.figure(figsize = (10, 5))
     plt.title = title
     plt.xlabel("Epoch")
@@ -378,9 +383,11 @@ def plot(title = 'OwO', accline = [75, 80, 85, 87], **kwargs):
     #     plt.hlines(accline, 1, len(data)+1, linestyles='dashed', colors=(0, 0, 0, 0.8))
 
     # plt.show()
-    plt.savefig(f'{title}.png')
+    plt.savefig(f'./{input_name}/{title}.png')
 
     return fig
+
+input_name = ""
 
 
 def main():
@@ -390,6 +397,12 @@ def main():
     print('pytorch device: ', device)
 
     all_rec = dict()
+
+    global input_name
+    input_name = input("name your config:")
+
+    if not(os.path.isdir(f'./{input_name}')):
+        os.mkdir(f'./{input_name}')
 
     best_accs = []
     for subject in range(1,10):
@@ -420,7 +433,7 @@ def main():
     best_accs = np.array(best_accs)
     best_avg = np.average(best_accs)
 
-    f = open("individual training results.txt", "a")
+    f = open(f"./{input_name}/individual training results.txt", "a")
     f.write(f"Total acc avg: {best_avg} \n\n")
     f.close()
 
