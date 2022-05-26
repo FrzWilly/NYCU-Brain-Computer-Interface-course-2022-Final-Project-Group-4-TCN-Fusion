@@ -12,6 +12,47 @@ import matplotlib.pyplot as plt
 from IPython.display import clear_output
 from sklearn.metrics import plot_confusion_matrix, confusion_matrix, ConfusionMatrixDisplay
 
+class CausalConv1d(nn.Module):
+    """
+    A causal 1D convolution.
+    """
+    def __init__(self, kernel_size, in_channels, out_channels, dilation):
+        super(CausalConv1d, self).__init__()
+        
+        # attributes:
+        self.kernel_size = kernel_size
+        self.in_channels = in_channels
+        self.dilation = dilation
+        
+        # modules:
+        self.conv1d = torch.nn.Conv1d(in_channels, out_channels,
+                                      kernel_size, stride=1,
+                                      padding=(kernel_size-1)*dilation,
+                                      dilation=dilation)
+
+    def forward(self, seq):
+        """
+        Note that Conv1d expects (batch, in_channels, in_length).
+        We assume that seq ~ (len(seq), batch, in_channels), so we'll reshape it first.
+        """
+        #print(seq.shape)
+        
+        seq = torch.squeeze(seq)
+        #print("seq 0 shape: ", seq.shape)
+        seq_ = seq#.permute(2,1,0)
+        # print("seq 1 shape: ", seq_.shape)
+        conv1d_out = self.conv1d(seq_)
+        # print("seq 2 shape: ", conv1d_out.shape)
+        #conv1d_out = conv1d_out.permute(2,1,0)
+        #print("seq 3 shape: ", conv1d_out.shape)
+        # remove k-1 values from the end:
+        conv1d_out = conv1d_out.permute(2, 1, 0)
+        # print("conv1d 0 shape: ", conv1d_out.shape)
+        conv1d_out = conv1d_out[0:-(self.kernel_size-1)*self.dilation].permute(2,1,0)
+        # print("conv1d 1 shape: ", conv1d_out.shape)
+        conv1d_out = torch.unsqueeze(conv1d_out, 2)
+        # print("conv1d 2 shape: ", conv1d_out.shape)
+        return conv1d_out
 
 class EEGBlock(nn.Module):
     def __init__(self, F1 = 8, F2 = 16, D = 2, KE = 32, pe = 0.3):
@@ -47,12 +88,16 @@ class EEGBlock(nn.Module):
         )
 
         # self.classifier = nn.Linear(16*17, 4, bias=True)
-        #self.softmax = nn.Softmax()
+        # self.softmax = nn.Softmax()
 
     def forward(self, x):
+        # print("eeg x0 shape", x.shape)
         x1 = self.conv1(x)
-        x2 = self.conv2(x)
-        x3 = self.conv3(x)
+        # print("eeg x0 shape", x.shape)
+        x2 = self.conv2(x1)
+        # print("eeg x0 shape", x.shape)
+        x3 = self.conv3(x2)
+        # print("eeg x0 shape", x.shape)
         
         #x = x.view(-1, 16*17)
         #x = self.classifier(x)
@@ -71,68 +116,85 @@ class TCNBlock(nn.Module):
         self.pt = pt # dropout rate
 
         self.dilated_causal_conv = nn.Sequential(
-            nn.Conv1d(self.F2, self.FT, self.KT, dilation=self.dilate_rate, padding_mode='causal', bias=False),
+            CausalConv1d(self.KT, self.F2, self.FT, dilation=self.dilate_rate),
             nn.BatchNorm2d(self.FT),
             nn.ELU(),
-            nn.AvgPool2d((1, 4)),
             nn.Dropout(self.pt),
 
-            nn.Conv1d(self.F2, self.FT, self.KT, dilation=self.dilate_rate, padding_mode='causal', bias=False),
+            CausalConv1d(self.KT, self.FT, self.FT, dilation=self.dilate_rate),
             nn.BatchNorm2d(self.FT),
             nn.ELU(),
-            nn.AvgPool2d((1, 4)),
             nn.Dropout(self.pt)
         )
 
-        self.conv1d = nn.Conv1d(self.F2, 1, padding='same')
+        self.conv1d = nn.Conv1d(self.F2, self.FT, 1, padding='same')
 
-    def forward(self, input):
-
-        x = input
+    def forward(self, x):
 
         y = self.dilated_causal_conv(x)
             
         if self.F2 != self.FT:
+            # print("x00 shape: ", x.shape)
+            x = torch.squeeze(x)
+            # print("x0 shape: ", x.shape)
             conv = self.conv1d(x)
+            conv = torch.unsqueeze(conv, 2)
+            # print("conv shape: ", conv.shape)
+            # print("y shape: ", y.shape)
             add = y + conv
         else:
             add = y + x
 
 
-        return x
+        return add
 
 class TCNFusion(nn.Module):
     def __init__(self):
-        super(EEGBlock, self).__init__()
+        super(TCNFusion, self).__init__()
 
         self.F1 = 8
         self.F2 = 16
+        self.FT = 12
         self.D = 2
 
         self.block1 = EEGBlock()
         modules = []
         for i in range(self.D):
-            modules.append(TCNBlock(dilate_rate=2**i))
+            F2 = self.F2 if i == 0 else self.FT
+            modules.append(TCNBlock(F2=F2, dilate_rate=2**i))
         
         self.block2 = nn.Sequential(*modules)
 
-        self.classifier = nn.Linear(16*17, 4, bias=True)
+        self.classifier = nn.Linear(16*281+28*35, 4, bias=True)
         #self.softmax = nn.Softmax()
 
     def forward(self, x):
+        print("x shape: ", x.shape)
         x0, x1 = self.block1(x)
-        x2 = self.block2(x)
-        x3 = torch.cat(x1, x2)
-        x0 = torch.flatten(x0)
-        x3 = torch.flatten(x3)
+        print("x0 shape: ", x0.shape)
+        print("x1 shape: ", x1.shape)
+        # x0 = torch.squeeze(x0)
+        # x1 = torch.squeeze(x1)
+        # print("x0 shape: ", x0.shape)
+        # print("x1 shape: ", x1.shape)
+        x2 = self.block2(x1)
+        print("x2 shape: ", x2.shape)
+        x12 = (x1, x2)
+        x3 = torch.cat(x12, dim=1)
+        print("x3 shape: ", x3.shape)
+        x0 = torch.flatten(x0, start_dim=1)
+        x3 = torch.flatten(x3, start_dim=1)
+        print("x0 shape: ", x0.shape)
+        print("x3 shape: ", x3.shape)
 
-        xfinal = torch.cat(x0, x3)
+        x03 = (x0, x3)
+        xfinal = torch.cat(x03,dim=1)
 
-        
-        x = x.view(-1, 16*17)
-        x = self.classifier(x)
+        print("xfinal shape: ", xfinal.shape)
+        # xfinal = xfinal.view(-1, 16*17)
+        xfinal = self.classifier(xfinal)
         #x = self.softmax(x)
-        return x
+        return xfinal
 
 def run_models( 
     models, epoch, batch, learning_rate, 
@@ -140,9 +202,9 @@ def run_models(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    now_running = "eeg"
+    now_running = "tcn-fusion"
 
-    path = '../BCICIV_2a_mat/'
+    path = './BCICIV_2a_mat/'
     S01E = loadmat(path + 'BCIC_S01_E')
     S1Ex = np.array(S01E['x_test'].squeeze())
     S1Ey = np.array(S01E['y_test'].squeeze())
@@ -311,12 +373,13 @@ def main():
 
     all_rec = dict()
 
-    for batch_size in (4,):
+    for batch_size in (32,):
         for lr in (0.003, 0.001, 0.0003, 0.0001):
             opt = "sgd"
             models = {
-                "eeg" : EEGBlock().to(device),
+                #"eeg" : EEGBlock().to(device),
                 #"shallow" : ShallowConvNet().to(device)
+                "tcn-fusion" : TCNFusion().to(device)
             }
             optimizers = {
                 "adam" : optim.Adam,
