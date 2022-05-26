@@ -198,7 +198,7 @@ class TCNFusion(nn.Module):
 
 def run_models( 
     models, epoch, batch, learning_rate, 
-    optimizer=optim.SGD, loss_func = nn.CrossEntropyLoss(), train_n = 1, test_n = 1, opt="sgd"):
+    optimizer=optim.Adam, loss_func = nn.CrossEntropyLoss(), train_n = 1, test_n = 1, opt="sgd"):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -239,7 +239,7 @@ def run_models(
     idx = 0
     decayRate = 1#0.9999
 
-    optimizer = optimizer(models[now_running].parameters(), lr = learning_rate)
+    optimizer = optimizer(models[now_running].parameters(), lr = learning_rate, weight_decay=0.3)
     
     #my_lr_scheduler.append(torch.optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=decayRate))
     idx = idx + 1
@@ -262,7 +262,7 @@ def run_models(
             model.train()
 
             outputs = model.forward(inputs[:, None])
-            loss = loss_func(outputs, labels)
+            loss = loss_func(outputs, labels) + 0.25*torch.norm(model.classifier.weight, p=2)
             loss.backward()
 
             train_cr += (
