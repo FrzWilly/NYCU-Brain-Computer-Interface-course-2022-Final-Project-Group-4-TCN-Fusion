@@ -70,8 +70,9 @@ class EEGBlock(nn.Module):
             nn.BatchNorm2d(self.F1)
         )
 
+        self.depwise = nn.Conv2d(self.F1, self.D*self.F1, (22, 1), padding='valid', groups=self.F1, bias=False)
+
         self.conv2 = nn.Sequential(
-            nn.Conv2d(self.F1, self.D*self.F1, (22, 1), padding='valid', groups=self.F1, bias=False),
             nn.BatchNorm2d(self.D*self.F1),
             nn.ELU(),
             nn.AvgPool2d((1, 4)),
@@ -94,6 +95,7 @@ class EEGBlock(nn.Module):
         # print("eeg x0 shape", x.shape)
         x1 = self.conv1(x)
         # print("eeg x0 shape", x.shape)
+        x1 = self.depwise(x1)
         x2 = self.conv2(x1)
         # print("eeg x0 shape", x.shape)
         x3 = self.conv3(x2)
@@ -109,7 +111,7 @@ class TCNBlock(nn.Module):
         super(TCNBlock, self).__init__()
 
         self.F2 = F2
-        self.dilate_rate = dilate_rate # depth multiplier
+        self.dilate_rate = dilate_rate
 
         self.KT = KT # kernal size of the first conv
         self.FT = FT
@@ -245,6 +247,9 @@ def run_models(
     idx = idx + 1
     last_loss = 10000.0
 
+    best_test_cr = 0.0
+    best_test_cr_ep = 0
+
     for ep in range(epoch):
         train_cr = 0.0
         test_cr = 0.0
@@ -262,7 +267,7 @@ def run_models(
             model.train()
 
             outputs = model.forward(inputs[:, None])
-            loss = loss_func(outputs, labels) + 0.25*torch.norm(model.classifier.weight, p=2)
+            loss = loss_func(outputs, labels) + 2.5e-3*torch.norm(model.classifier.weight, p=2) + 1e-2*torch.norm(model.block1.depwise.weight, p=2)
             loss.backward()
 
             train_cr += (
@@ -296,6 +301,10 @@ def run_models(
                 pred += torch.max(outputs, 1)[1].cpu()
                 real += labels.long().view(-1).cpu()
 
+        if (test_cr*100.0)/len(test_dataset) > best_test_cr:
+            best_test_cr = (test_cr*100.0)/len(test_dataset)
+            best_test_cr_ep = ep
+
         rec["train"] += [(train_cr*100.0)/len(train_dataset)]
         rec["test"] += [(test_cr*100.0)/len(test_dataset)]
 
@@ -328,8 +337,13 @@ def run_models(
 
     print("\ntraining data final accuracy:", rec["train"][len(rec["train"])-1])
     print("testing data final accuracy:", rec["test"][len(rec["test"])-1])
+    print("heighest testing accuracy: ", best_test_cr)
+    print("(at epoch", best_test_cr_ep, ")")
     print("\n")
-    
+
+    f = open("individual training results.txt", "a")
+    f.write(f"S{test_n}: {best_test_cr} at epoch {best_test_cr_ep}")
+    f.close()
     #PlotImg('EEGBlock', **rec)
 
     # inp = input("Do you want to save " + now_running + " parameters ? (y/n)")
@@ -337,7 +351,7 @@ def run_models(
     #     torch.save(models['elu'].state_dict(), now_running+' parameters')
         
     torch.cuda.empty_cache()
-    return rec
+    return rec, best_test_cr
 
 def plot(title = 'OwO', accline = [75, 80, 85, 87], **kwargs):
     fig = plt.figure(figsize = (10, 5))
@@ -377,6 +391,7 @@ def main():
 
     all_rec = dict()
 
+    best_accs = []
     for subject in range(1,10):
         for batch_size in (64,):
             for lr in (0.0009,):
@@ -392,13 +407,22 @@ def main():
                 }
                 optimizer = optimizers[opt]
                 print(f"start training with batch size {batch_size}, learning rate {lr}:")
-                rec = run_models(models, 1000, batch_size, lr, optimizer, train_n=subject, test_n=subject, opt=opt)
+                rec, best_acc = run_models(models, 1000, batch_size, lr, optimizer, train_n=subject, test_n=subject, opt=opt)
+                best_accs.append(best_acc)
                 acc_avg = 0.0
                 for i in range(100):
                     acc_avg += rec["test"][len(rec["test"])-1-i]
                 acc_avg /= 100
                 print(f"batch size: {batch_size}, lr: {lr}, test acc: ", acc_avg)
                 plot(title=f'{batch_size}_{lr}_{opt}_subject0{subject}', **rec)
+
+    
+    best_accs = np.array(best_accs)
+    best_avg = np.average(best_accs)
+
+    f = open("individual training results.txt", "a")
+    f.write(f"Total acc avg: {best_avg}")
+    f.close()
 
     for (key1, key2), value in all_rec:
         print(f"{key1}, {key2} final acc: ", value)
