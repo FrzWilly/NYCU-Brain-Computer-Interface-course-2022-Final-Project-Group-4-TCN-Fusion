@@ -267,7 +267,7 @@ def run_models(
             model.train()
 
             outputs = model.forward(inputs[:, None])
-            loss = loss_func(outputs, labels) + 2.5e-3*torch.norm(model.classifier.weight, p=2) + 1e-2*torch.norm(model.block1.depwise.weight, p=2)
+            loss = loss_func(outputs, labels) #+ 2.5e-3*torch.norm(model.classifier.weight, p=2) + 1e-2*torch.norm(model.block1.depwise.weight, p=2)
             loss.backward()
 
             train_cr += (
@@ -341,8 +341,8 @@ def run_models(
     print("(at epoch", best_test_cr_ep, ")")
     print("\n")
 
-    f = open("individual training results.txt\n", "a")
-    f.write(f"S{test_n}: {best_test_cr} at epoch {best_test_cr_ep}")
+    f = open("individual training results.txt", "a")
+    f.write(f"S{test_n}: {best_test_cr} at epoch {best_test_cr_ep}\n")
     f.close()
     #PlotImg('EEGBlock', **rec)
 
@@ -421,11 +421,11 @@ def main():
     best_avg = np.average(best_accs)
 
     f = open("individual training results.txt", "a")
-    f.write(f"Total acc avg: {best_avg}")
+    f.write(f"Total acc avg: {best_avg} \n\n")
     f.close()
 
     for (key1, key2), value in all_rec:
-        print(f"{key1}, {key2} final acc: \n\n", value)
+        print(f"{key1}, {key2} final acc:", value)
 
 if __name__ == '__main__':
     main()
