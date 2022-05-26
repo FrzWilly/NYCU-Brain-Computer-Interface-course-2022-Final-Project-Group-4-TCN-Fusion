@@ -169,28 +169,28 @@ class TCNFusion(nn.Module):
         #self.softmax = nn.Softmax()
 
     def forward(self, x):
-        print("x shape: ", x.shape)
+        # print("x shape: ", x.shape)
         x0, x1 = self.block1(x)
-        print("x0 shape: ", x0.shape)
-        print("x1 shape: ", x1.shape)
+        # print("x0 shape: ", x0.shape)
+        # print("x1 shape: ", x1.shape)
         # x0 = torch.squeeze(x0)
         # x1 = torch.squeeze(x1)
         # print("x0 shape: ", x0.shape)
         # print("x1 shape: ", x1.shape)
         x2 = self.block2(x1)
-        print("x2 shape: ", x2.shape)
+        # print("x2 shape: ", x2.shape)
         x12 = (x1, x2)
         x3 = torch.cat(x12, dim=1)
-        print("x3 shape: ", x3.shape)
+        # print("x3 shape: ", x3.shape)
         x0 = torch.flatten(x0, start_dim=1)
         x3 = torch.flatten(x3, start_dim=1)
-        print("x0 shape: ", x0.shape)
-        print("x3 shape: ", x3.shape)
+        # print("x0 shape: ", x0.shape)
+        # print("x3 shape: ", x3.shape)
 
         x03 = (x0, x3)
         xfinal = torch.cat(x03,dim=1)
 
-        print("xfinal shape: ", xfinal.shape)
+        # print("xfinal shape: ", xfinal.shape)
         # xfinal = xfinal.view(-1, 16*17)
         xfinal = self.classifier(xfinal)
         #x = self.softmax(x)
@@ -198,30 +198,34 @@ class TCNFusion(nn.Module):
 
 def run_models( 
     models, epoch, batch, learning_rate, 
-    optimizer=optim.SGD, loss_func = nn.CrossEntropyLoss(), opt="sgd"):
+    optimizer=optim.SGD, loss_func = nn.CrossEntropyLoss(), train_n = 1, test_n = 1, opt="sgd"):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     now_running = "tcn-fusion"
 
     path = './BCICIV_2a_mat/'
-    S01E = loadmat(path + 'BCIC_S01_E')
-    S1Ex = np.array(S01E['x_test'].squeeze())
-    S1Ey = np.array(S01E['y_test'].squeeze())
+    T = loadmat(path + f'BCIC_S0{train_n}_T')
+    Tx = np.array(T['x_train'].squeeze())
+    Ty = np.array(T['y_train'].squeeze())
 
-    Tx = []
-    Ty = []
-    for idx in range(2, 10):
-        S29T = loadmat(path + f'BCIC_S0{idx}_T')
-        Tx.append(S29T['x_train'].squeeze())
-        Ty.append(S29T['y_train'].squeeze())
+    E = loadmat(path + f'BCIC_S0{test_n}_E')
+    Ex = np.array(E['x_test'].squeeze())
+    Ey = np.array(E['y_test'].squeeze())
 
-    Tx = np.array(Tx)
-    Tx = Tx.reshape((-1,) + Tx.shape[2:])
-    Ty = np.array(Ty).reshape(-1)
+    # Tx = []
+    # Ty = []
+    # for idx in range(2, 10):
+    #     S29T = loadmat(path + f'BCIC_S0{idx}_T')
+    #     Tx.append(S29T['x_train'].squeeze())
+    #     Ty.append(S29T['y_train'].squeeze())
+
+    # Tx = np.array(Tx)
+    # Tx = Tx.reshape((-1,) + Tx.shape[2:])
+    # Ty = np.array(Ty).reshape(-1)
 
     train_dataset = TensorDataset(torch.Tensor(Tx), torch.Tensor(Ty))
-    test_dataset = TensorDataset(torch.Tensor(S1Ex), torch.Tensor(S1Ey))
+    test_dataset = TensorDataset(torch.Tensor(Ex), torch.Tensor(Ey))
 
     train_loader = DataLoader(train_dataset, batch_size = batch, shuffle=True)
     test_loader = DataLoader(test_dataset, len(test_dataset), shuffle=True)
@@ -311,7 +315,7 @@ def run_models(
             disp = ConfusionMatrixDisplay(confusion_matrix = conf_matrix, display_labels = [0, 1, 2, 3])
             disp = disp.plot(cmap = plt.cm.Blues)
 
-            plt.savefig(f'confusion_all_{batch}_{learning_rate}_{opt}.png')
+            plt.savefig(f'confusion_all_{batch}_{learning_rate}_{opt}_subject0{train_n}.png')
             #plt.show()
             conf_matrix = confusion_matrix( 
                 pred, real, normalize = 'true'
@@ -319,7 +323,7 @@ def run_models(
             disp = ConfusionMatrixDisplay(confusion_matrix = conf_matrix, display_labels = [0, 1, 2, 3])
             disp = disp.plot(cmap = plt.cm.Blues)
 
-            plt.savefig(f'confusion_true_{batch}_{learning_rate}_{opt}.png')
+            plt.savefig(f'confusion_true_{batch}_{learning_rate}_{opt}_subject0{train_n}.png')
             #plt.show()
 
     print("\ntraining data final accuracy:", rec["train"][len(rec["train"])-1])
@@ -373,56 +377,31 @@ def main():
 
     all_rec = dict()
 
-    for batch_size in (32,):
-        for lr in (0.003, 0.001, 0.0003, 0.0001):
-            opt = "sgd"
-            models = {
-                #"eeg" : EEGBlock().to(device),
-                #"shallow" : ShallowConvNet().to(device)
-                "tcn-fusion" : TCNFusion().to(device)
-            }
-            optimizers = {
-                "adam" : optim.Adam,
-                "sgd" : optim.SGD
-            }
-            optimizer = optimizers[opt]
-            print(f"start training with batch size {batch_size}, learning rate {lr}:")
-            rec = run_models(models, 1500, batch_size, lr, optimizer, opt=opt)
-            acc_avg = 0.0
-            for i in range(100):
-                acc_avg += rec["test"][len(rec["test"])-1-i]
-            acc_avg /= 100
-            print(f"batch size: {batch_size}, lr: {lr}, test acc: ", acc_avg)
-            plot(title=f'{batch_size}_{lr}_{opt}', **rec)
+    for subject in range(1,10):
+        for batch_size in (64,):
+            for lr in (0.0009,):
+                opt = "adam"
+                models = {
+                    #"eeg" : EEGBlock().to(device),
+                    #"shallow" : ShallowConvNet().to(device)
+                    "tcn-fusion" : TCNFusion().to(device)
+                }
+                optimizers = {
+                    "adam" : optim.Adam,
+                    #"sgd" : optim.SGD
+                }
+                optimizer = optimizers[opt]
+                print(f"start training with batch size {batch_size}, learning rate {lr}:")
+                rec = run_models(models, 1000, batch_size, lr, optimizer, train_n=subject, test_n=subject, opt=opt)
+                acc_avg = 0.0
+                for i in range(100):
+                    acc_avg += rec["test"][len(rec["test"])-1-i]
+                acc_avg /= 100
+                print(f"batch size: {batch_size}, lr: {lr}, test acc: ", acc_avg)
+                plot(title=f'{batch_size}_{lr}_{opt}_subject0{subject}', **rec)
 
     for (key1, key2), value in all_rec:
         print(f"{key1}, {key2} final acc: ", value)
-
-    # batch_size = 32
-    # lr = 0.0003
-        
-    # models = {
-    #             "eeg" : EEGBlock().to(device),
-    #             #"shallow" : ShallowConvNet().to(device)
-    #         }
-    # print(f"start training with batch size {batch_size}, learning rate {lr}:")
-    # rec = run_models(models, 1500, batch_size, lr, optimizer=optim.SGD)
-    # acc_avg = 0.0
-    # for i in range(100):
-    #     acc_avg += rec["test"][len(rec["test"])-1-i]
-    # acc_avg /= 100
-    # print(f"batch size: {batch_size}, lr: {lr}, test acc: ", acc_avg)
-
-    # plot(title=f'{batch_size}_{lr}', **rec)
-    # rec = run_models(models, 1500, batch_size, lr, optimizer=optim.Adam)
-    # acc_avg = 0.0
-    # for i in range(100):
-    #     acc_avg += rec["test"][len(rec["test"])-1-i]
-    # acc_avg /= 100
-    # print(f"batch size: {batch_size}, lr: {lr}, test acc: ", acc_avg)
-    # plot(title=f'{batch_size}_{lr}', **rec)
-
-
 
 if __name__ == '__main__':
     main()
