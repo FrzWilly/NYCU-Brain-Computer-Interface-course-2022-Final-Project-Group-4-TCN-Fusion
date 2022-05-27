@@ -119,12 +119,18 @@ class TCNBlock(nn.Module):
         self.pt = pt # dropout rate
 
         self.dilated_causal_conv = nn.Sequential(
-            CausalConv1d(self.KT, self.F2, self.FT, dilation=self.dilate_rate),
+            CausalConv1d(self.KT, self.F2, self.FT, dilation=1),
+            CausalConv1d(self.KT, self.FT, self.FT, dilation=2),
+            CausalConv1d(self.KT, self.FT, self.FT, dilation=4),
+            CausalConv1d(self.KT, self.FT, self.FT, dilation=8),
             nn.BatchNorm2d(self.FT),
             nn.ELU(),
             nn.Dropout(self.pt),
 
-            CausalConv1d(self.KT, self.FT, self.FT, dilation=self.dilate_rate),
+            CausalConv1d(self.KT, self.FT, self.FT, dilation=1),
+            CausalConv1d(self.KT, self.FT, self.FT, dilation=2),
+            CausalConv1d(self.KT, self.FT, self.FT, dilation=4),
+            CausalConv1d(self.KT, self.FT, self.FT, dilation=8),
             nn.BatchNorm2d(self.FT),
             nn.ELU(),
             nn.Dropout(self.pt)
@@ -158,7 +164,7 @@ class TCNFusion(nn.Module):
         self.F1 = 8
         self.F2 = 16
         self.FT = 12
-        self.D = 3
+        self.D = 2
 
         self.block1 = EEGBlock(pe=0.3)
         modules = []
@@ -270,7 +276,15 @@ def run_models(
             model.train()
 
             outputs = model.forward(inputs[:, None])
-            loss = loss_func(outputs, labels) + 2.5e-1*torch.norm(model.classifier.weight, p=2)# + 1e-3*torch.norm(model.block1.depwise.weight, p=2)
+            dilated_conv_reg = 0
+            for i in range(2):
+                for j in range(4):
+                    dilated_conv_reg += 1e-1*torch.norm(model.block2[i].dilated_causal_conv[j].conv1d.weight, p=2)
+                for j in range(7, 11):
+                    dilated_conv_reg += 1e-1*torch.norm(model.block2[i].dilated_causal_conv[j].conv1d.weight, p=2)
+
+            reg_term = dilated_conv_reg #+ 2.5e-1*torch.norm(model.classifier.weight, p=2)# + 1e-3*torch.norm(model.block1.depwise.weight, p=2)
+            loss = loss_func(outputs, labels) + reg_term
             loss.backward()
 
             train_cr += (
